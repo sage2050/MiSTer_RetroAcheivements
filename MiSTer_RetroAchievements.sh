@@ -1,0 +1,432 @@
+#!/usr/bin/env bash
+# MiSTer_RetroAchievements.sh - Bootstrap the mister-fpga-retroachievements toolkit onto a
+# MiSTer FPGA over FTP. Run this from your workstation (Linux, macOS, WSL).
+# It does not need to run on the MiSTer itself.
+#
+# What it does:
+#   1. Downloads odelot's latest Main_MiSTer binary + every published core
+#      .rbf for systems he supports; auto-discovered from GitHub at install time.
+#   2. Uploads the modified binary, cores, achievement.wav, a placeholder
+#      retroachievements.cfg, .mgl launchers, and the manifest.
+#   4. Appends an [RA_*] section to /media/fat/MiSTer.ini to load RA cores with the RA main.
+#
+# Usage:
+#   ./MiSTer_RetroAchievements.sh [options]
+#   The script will prompt for the MiSTer IP address interactively.
+#
+# Flags:
+#   -v, --verbose   Print each FTP command as it runs
+#   -n, --dry-run   Stage files locally but skip all FTP writes (safe to test)
+#   -h, --help      Show usage and exit
+#
+# Environment variables (optional):
+#   MISTER_USER    FTP username                   (default: root)
+#   MISTER_PASS    FTP password                   (default: 1)
+#   STAGING_DIR    Local working directory         (default: ./staging)
+#
+# Project: https://github.com/manyhats-mike/mister-fpga-retroachievements
+# License: MIT
+
+set -eu
+ 
+# ─────────────────────────────────────────────
+# Flag parsing
+# ─────────────────────────────────────────────
+ 
+VERBOSE=0
+DRY_RUN=0
+ 
+usage() {
+  cat <<USAGE
+Usage: ./install.sh [options]
+ 
+The script will prompt for the MiSTer IP address interactively.
+ 
+Options:
+  -v, --verbose   Print each FTP command and curl call as it runs
+  -n, --dry-run   Download and stage files locally but skip all FTP writes
+  -h, --help      Show this help and exit
+USAGE
+  exit 0
+}
+ 
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -v|--verbose) VERBOSE=1 ;;
+    -n|--dry-run) DRY_RUN=1 ;;
+    -h|--help)    usage ;;
+    *) echo "ERR: Unknown option '$1'. Use --help for usage." >&2; exit 1 ;;
+  esac
+  shift
+done
+ 
+# ─────────────────────────────────────────────
+# Configuration
+# ─────────────────────────────────────────────
+ 
+SCRIPT_VERSION="0.3.0"
+ 
+MISTER_USER="${MISTER_USER:-root}"
+MISTER_PASS="${MISTER_PASS:-1}"
+STAGING_DIR="${STAGING_DIR:-./staging}"
+ 
+if [ -z "${MISTER_HOST:-}" ]; then
+  printf "MiSTer IP address: "
+  read -r MISTER_HOST
+  [ -n "$MISTER_HOST" ] || { echo "ERR: IP address cannot be empty." >&2; exit 1; }
+fi
+ 
+GITHUB_USER="odelot"
+GITHUB_API="https://api.github.com"
+ 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+ 
+echo "install.sh v${SCRIPT_VERSION}"
+echo "Target:  ftp://${MISTER_USER}@${MISTER_HOST}/"
+echo "Staging: $STAGING_DIR"
+[ "$DRY_RUN" = "1" ] && echo "Mode:    DRY RUN — no files will be written to the MiSTer"
+[ "$VERBOSE" = "1" ] && echo "Mode:    VERBOSE — FTP commands will be printed"
+echo
+ 
+# ─────────────────────────────────────────────
+# Helpers
+# ─────────────────────────────────────────────
+ 
+# Abort if a required CLI tool is missing.
+require_tool() {
+  command -v "$1" >/dev/null 2>&1 || { echo "ERR: missing required tool '$1'" >&2; exit 1; }
+}
+ 
+require_tool curl
+require_tool unzip
+require_tool awk
+ 
+mkdir -p "$STAGING_DIR/cores" "$STAGING_DIR/main"
+ 
+# Build an FTP URL for a given absolute remote path.
+# Uses double-slash (ftp://HOST//path) so the path is relative to the
+# filesystem root, not to the FTP login home (/root on MiSTer).
+ftp_url() {
+  printf "ftp://%s//%s" "$MISTER_HOST" "${1#/}"
+}
+ 
+# Internal curl wrapper: adds -v when --verbose is set.
+_curl() {
+  if [ "$VERBOSE" = "1" ]; then
+    curl -v "$@"
+  else
+    curl -sS "$@"
+  fi
+}
+ 
+ftp_get() {
+  local remote_path="$1"
+  local local_dest="$2"
+  [ "$VERBOSE" = "1" ] && echo "    [ftp_get] ${remote_path} -> ${local_dest}"
+  _curl --connect-timeout 10 \
+    -u "${MISTER_USER}:${MISTER_PASS}" \
+    -o "$local_dest" \
+    "$(ftp_url "$remote_path")"
+}
+ 
+ftp_put() {
+  local local_file="$1"
+  local remote_path="$2"
+  [ "$VERBOSE" = "1" ] && echo "    [ftp_put] ${local_file} -> ${remote_path}"
+  if [ "$DRY_RUN" = "1" ]; then
+    echo "    [dry-run] skipping upload: ${remote_path}"
+    return 0
+  fi
+  _curl --connect-timeout 10 \
+    -u "${MISTER_USER}:${MISTER_PASS}" \
+    -T "$local_file" \
+    "$(ftp_url "$remote_path")"
+}
+ 
+ftp_ls() {
+  local remote_path="$1"
+  [ "$VERBOSE" = "1" ] && echo "    [ftp_ls]  ${remote_path}"
+  _curl --connect-timeout 10 \
+    -u "${MISTER_USER}:${MISTER_PASS}" \
+    "$(ftp_url "$remote_path")"
+}
+ 
+ftp_mkdir() {
+  local remote_path="$1"
+  [ "$VERBOSE" = "1" ] && echo "    [ftp_mkdir] ${remote_path}"
+  if [ "$DRY_RUN" = "1" ]; then
+    echo "    [dry-run] skipping mkdir: ${remote_path}"
+    return 0
+  fi
+  # Errors are suppressed because MKD fails harmlessly if the dir exists.
+  _curl --connect-timeout 10 \
+    -u "${MISTER_USER}:${MISTER_PASS}" \
+    --quote "MKD /${remote_path#/}" \
+    "$(ftp_url "/")" 2>/dev/null || true
+}
+ 
+ftp_chmod() {
+  local remote_path="$1"
+  local mode="$2"
+  [ "$VERBOSE" = "1" ] && echo "    [ftp_chmod] ${mode} ${remote_path}"
+  if [ "$DRY_RUN" = "1" ]; then
+    echo "    [dry-run] skipping chmod: ${mode} ${remote_path}"
+    return 0
+  fi
+  _curl -u "${MISTER_USER}:${MISTER_PASS}" \
+    --quote "SITE CHMOD ${mode} ${remote_path}" \
+    "$(ftp_url "/")" >/dev/null 2>&1 || true
+}
+ 
+# Extract a single JSON string value using grep + sed (no jq dependency).
+# Usage: json_string <key> <file>
+json_string() {
+  local key="$1"
+  local file="$2"
+  grep -oE "\"${key}\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" "$file" \
+    | head -1 \
+    | sed -E 's/.*"([^"]*)".*/\1/'
+}
+ 
+# Extract the first URL ending in a given extension from a JSON file.
+# Usage: json_download_url <.ext> <file>
+json_download_url() {
+  local ext="$1"
+  local file="$2"
+  grep -oE '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]*'"${ext}"'"' "$file" \
+    | head -1 \
+    | sed -E 's/.*"([^"]*)".*/\1/'
+}
+ 
+# ─────────────────────────────────────────────
+# Step 0: Preflight — verify MiSTer is reachable
+# ─────────────────────────────────────────────
+ 
+echo "== Step 0: Verifying MiSTer connectivity =="
+ 
+if [ "$DRY_RUN" = "1" ]; then
+  echo "  [dry-run] skipping connectivity check"
+elif ! ftp_ls "/media/fat/" >/dev/null 2>&1; then
+  echo "ERR: Cannot list /media/fat/ on ${MISTER_HOST}." >&2
+  echo "     Check that FTP is enabled and that host/user/password are correct." >&2
+  exit 1
+else
+  echo "  OK — connected to ${MISTER_HOST}"
+fi
+ 
+# ─────────────────────────────────────────────
+# Step 1: Download the latest odelot/Main_MiSTer release
+# ─────────────────────────────────────────────
+ 
+echo "== Step 1: Downloading odelot/Main_MiSTer =="
+ 
+curl -sSL -o "$STAGING_DIR/main_release.json" \
+  "$GITHUB_API/repos/$GITHUB_USER/Main_MiSTer/releases/latest"
+ 
+main_download_url="$(json_download_url ".zip" "$STAGING_DIR/main_release.json")"
+main_tag="$(json_string "tag_name" "$STAGING_DIR/main_release.json")"
+ 
+[ -n "$main_download_url" ] || {
+  echo "ERR: No .zip asset found on the latest Main_MiSTer release." >&2
+  exit 1
+}
+ 
+echo "  Release tag: $main_tag"
+echo "  Downloading binary zip..."
+curl --progress-bar -L -o "$STAGING_DIR/main.zip" "$main_download_url"
+unzip -o "$STAGING_DIR/main.zip" -d "$STAGING_DIR/main" >/dev/null
+ 
+MAIN_BINARY="$(find "$STAGING_DIR/main" -maxdepth 3 -type f -name MiSTer | head -1)"
+MAIN_WAV="$(find "$STAGING_DIR/main" -maxdepth 3 -type f -name achievement.wav | head -1)"
+MAIN_CFG="$(find "$STAGING_DIR/main" -maxdepth 3 -type f -name retroachievements.cfg | head -1)"
+ 
+[ -n "$MAIN_BINARY" ] || {
+  echo "ERR: MiSTer binary not found inside the downloaded zip." >&2
+  exit 1
+}
+ 
+# ─────────────────────────────────────────────
+# Step 2: Discover and download all odelot/*_MiSTer cores
+# ─────────────────────────────────────────────
+ 
+echo "== Step 2: Discovering odelot/*_MiSTer cores =="
+ 
+curl -sSL -o "$STAGING_DIR/repos.json" \
+  "$GITHUB_API/users/$GITHUB_USER/repos?per_page=100"
+ 
+# Pull every repo ending in _MiSTer, excluding the main binary repo itself.
+core_repos="$(
+  grep -oE '"name"[[:space:]]*:[[:space:]]*"[^"]*_MiSTer"' "$STAGING_DIR/repos.json" \
+    | sed -E 's/.*"([^"]*)".*/\1/' \
+    | grep -v '^Main_MiSTer$' \
+  || true
+)"
+ 
+[ -n "$core_repos" ] || {
+  echo "ERR: No odelot/*_MiSTer core repos found." >&2
+  exit 1
+}
+ 
+manifest_lines=""
+ 
+for repo in $core_repos; do
+  echo "-- $repo --"
+ 
+  curl -sSL -o "$STAGING_DIR/rel_${repo}.json" \
+    "$GITHUB_API/repos/$GITHUB_USER/$repo/releases/latest"
+ 
+  # Skip repos that have no published releases yet.
+  if grep -q '"message"[[:space:]]*:[[:space:]]*"Not Found"' "$STAGING_DIR/rel_${repo}.json"; then
+    echo "  No releases yet — skipping"
+    continue
+  fi
+ 
+  release_tag="$(json_string "tag_name" "$STAGING_DIR/rel_${repo}.json")"
+  rbf_url="$(json_download_url ".rbf" "$STAGING_DIR/rel_${repo}.json")"
+ 
+  # Fall back to a zip asset if no standalone .rbf is published.
+  zip_url=""
+  if [ -z "$rbf_url" ]; then
+    zip_url="$(json_download_url ".zip" "$STAGING_DIR/rel_${repo}.json")"
+  fi
+ 
+  [ -n "$rbf_url" ] || [ -n "$zip_url" ] || {
+    echo "  No .rbf or .zip asset found — skipping"
+    continue
+  }
+ 
+  # Strip the _MiSTer suffix to get the plain core name (e.g. NES_MiSTer → NES).
+  core_name="${repo%_MiSTer}"
+  staged_rbf="$STAGING_DIR/cores/${core_name}.rbf"
+ 
+  if [ -n "$rbf_url" ]; then
+    asset_filename="$(basename "$rbf_url")"
+    echo "  Downloading $asset_filename..."
+    curl --progress-bar -L -o "$staged_rbf" "$rbf_url"
+  else
+    asset_filename="$(basename "$zip_url")"
+    echo "  Downloading $asset_filename (zip)..."
+    curl --progress-bar -L -o "$STAGING_DIR/${repo}.zip" "$zip_url"
+    unzip -o "$STAGING_DIR/${repo}.zip" -d "$STAGING_DIR/${repo}" >/dev/null
+    rbf_inside="$(find "$STAGING_DIR/${repo}" -maxdepth 4 -type f -name '*.rbf' | head -1)"
+    [ -n "$rbf_inside" ] || { echo "  ERR: No .rbf found inside $asset_filename" >&2; continue; }
+    cp "$rbf_inside" "$staged_rbf"
+  fi
+ 
+  echo "  Staged ${core_name}.rbf  (tag: $release_tag)"
+ 
+  manifest_lines="${manifest_lines}${repo}|${core_name}|/media/fat/_Console|${core_name}_*.rbf|${release_tag}|${asset_filename}
+"
+done
+ 
+# ─────────────────────────────────────────────
+# Step 3: Upload RA cores and supporting files
+# ─────────────────────────────────────────────
+ 
+echo "== Step 3: Uploading _RA_Cores payload =="
+ 
+ftp_mkdir "/media/fat/_RA_Cores"
+ 
+# Upload the modified MiSTer binary (runs alongside stock cores).
+ftp_put "$MAIN_BINARY" "/media/fat/_RA_Cores/MiSTer_RA.ra"
+echo "  Uploaded MiSTer_RA.ra"
+ 
+# Upload the achievement sound effect if it was bundled in the release.
+[ -n "$MAIN_WAV" ] && ftp_put "$MAIN_WAV" "/media/fat/achievement.wav" && echo "  Uploaded achievement.wav"
+ 
+# Upload the config bundled in the Main_MiSTer release, only if one doesn't
+# already exist on the MiSTer.
+if ! ftp_ls "/media/fat/" 2>/dev/null | grep -qE "\\sretroachievements\\.cfg\$"; then
+  if [ -n "$MAIN_CFG" ]; then
+    ftp_put "$MAIN_CFG" "/media/fat/retroachievements.cfg"
+    echo "  Uploaded retroachievements.cfg  ← fill this in before using RA!"
+  else
+    echo "  WARN: retroachievements.cfg not found in the Main_MiSTer release — skipping" >&2
+  fi
+else
+  echo "  retroachievements.cfg already present — leaving untouched"
+fi
+ 
+# Upload each staged core .rbf to _RA_Cores/Cores/ and generate a
+# companion .mgl launcher that points MiSTer at the RA variant of the core.
+# _RA_Cores is created above; Cores must be created as a separate MKD call
+# since FTP cannot create nested directories in a single command.
+ftp_mkdir "/media/fat/_RA_Cores/Cores"
+echo "  Created _RA_Cores/Cores"
+for rbf_file in "$STAGING_DIR"/cores/*.rbf; do
+  [ -f "$rbf_file" ] || continue
+  remote_name="$(basename "$rbf_file")"
+ 
+  # Upload the core binary.
+  ftp_put "$rbf_file" "/media/fat/_RA_Cores/Cores/$remote_name"
+  echo "  Uploaded Cores/$remote_name"
+ 
+  # Write a MiSTer Game Description launcher that references this core.
+  core_name="${remote_name%.rbf}"
+  tmp_mgl="$(mktemp)"
+  cat > "$tmp_mgl" <<EOF
+<mistergamedescription>
+    <rbf>_RA_Cores/Cores/$core_name</rbf>
+    <setname same_dir="1">RA_$core_name</setname>
+</mistergamedescription>
+EOF
+  mgl_name="${core_name}.mgl"
+  ftp_put "$tmp_mgl" "/media/fat/_RA_Cores/$mgl_name"
+  rm -f "$tmp_mgl"
+  echo "  Uploaded _RA_Cores/$mgl_name"
+done
+ 
+# Build and upload the install manifest (used by update/rollback scripts).
+tmp_manifest="$(mktemp)"
+{
+  echo "# repo|basename|stock_folder|stock_pattern|release_tag|rbf_source_name"
+  printf "%s" "$manifest_lines"
+} > "$tmp_manifest"
+ftp_put "$tmp_manifest" "/media/fat/_RA_Cores/.manifest"
+rm -f "$tmp_manifest"
+echo "  Uploaded .manifest"
+ 
+# ─────────────────────────────────────────────
+# Step 4: Append RA core config to MiSTer.ini
+# ─────────────────────────────────────────────
+ 
+echo "== Step 4: Updating MiSTer.ini =="
+ 
+tmp_ini="$STAGING_DIR/MiSTer.ini"
+ 
+if ! ftp_get "/media/fat/MiSTer.ini" "$tmp_ini"; then
+  echo "  ERR: Could not download /media/fat/MiSTer.ini — skipping" >&2
+else
+  if grep -q "^\[RA_\*\]" "$tmp_ini"; then
+    echo "  [RA_*] block already present — leaving untouched"
+  else
+    cat >> "$tmp_ini" <<'EOF'
+ 
+[RA_*]
+main=MiSTer_RA
+EOF
+    ftp_put "$tmp_ini" "/media/fat/MiSTer.ini"
+    echo "  Appended [RA_*] block to MiSTer.ini"
+  fi
+fi
+ 
+# ─────────────────────────────────────────────
+# Done
+# ─────────────────────────────────────────────
+ 
+cat <<EOF
+ 
+== Install complete ==
+ 
+Next steps:
+  1. Edit /media/fat/retroachievements.cfg on the MiSTer and replace the
+     placeholder values with your RetroAchievements username and password.
+     (Use your real account password — not a Web API key. The rcheevos client
+     only sends it on first login, then caches a session token.)
+ 
+  2. Reboot the MiSTer so the new MiSTer.ini settings take effect.
+ 
+  3. Launch a game on a supported system to confirm achievements load.
+EOF
+ 
