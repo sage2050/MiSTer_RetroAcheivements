@@ -249,10 +249,17 @@ if ftp_get "/media/fat/_RA_Cores/.manifest" "$tmp_existing_main" 2>/dev/null; th
 fi
 
 if [ -n "$installed_main_tag" ] && [ "$installed_main_tag" = "$main_tag" ]; then
-  echo "  MiSTer_RA already at $main_tag — skipping download"
+  echo "  MiSTer_RA already at $main_tag — skipping binary download"
   MAIN_BINARY=""
   MAIN_WAV=""
-  MAIN_CFG=""
+  # Still need the zip for retroachievements.cfg in case it's missing on the MiSTer.
+  # Only download if we don't already have it staged from a previous run.
+  if [ ! -f "$STAGING_DIR/main.zip" ]; then
+    echo "  Downloading zip for cfg extraction..."
+    curl --progress-bar -L -o "$STAGING_DIR/main.zip" "$main_download_url"
+    unzip -o "$STAGING_DIR/main.zip" -d "$STAGING_DIR/main" >/dev/null
+  fi
+  MAIN_CFG="$(find "$STAGING_DIR/main" -maxdepth 3 -type f -name retroachievements.cfg | head -1)"
 else
   echo "  Downloading binary zip..."
   curl --progress-bar -L -o "$STAGING_DIR/main.zip" "$main_download_url"
@@ -330,6 +337,7 @@ installed_tag() {
 }
 
 manifest_lines=""
+skipped_cores=""
 
 for repo in $core_repos; do
   echo "-- $repo --"
@@ -352,10 +360,14 @@ for repo in $core_repos; do
     zip_url="$(json_download_url ".zip" "$STAGING_DIR/rel_${repo}.json")"
   fi
 
-  [ -n "$rbf_url" ] || [ -n "$zip_url" ] || {
+  if [ -z "$rbf_url" ] && [ -z "$zip_url" ]; then
     echo "  No .rbf or .zip asset found — skipping"
+    skipped_cores="${skipped_cores}${repo} (no asset)\n"
+    # Preserve the previously installed manifest entry so the tag is not lost.
+    old_entry="$([ -n "$existing_manifest" ] && grep "^${repo}|" "$existing_manifest" 2>/dev/null || true)"
+    [ -n "$old_entry" ] && manifest_lines="${manifest_lines}${old_entry}\n"
     continue
-  }
+  fi
 
   # Strip the _MiSTer suffix to get the plain core name (e.g. NES_MiSTer → NES).
   core_name="${repo%_MiSTer}"
@@ -386,7 +398,13 @@ for repo in $core_repos; do
     curl --progress-bar -L -o "$STAGING_DIR/${repo}.zip" "$zip_url"
     unzip -o "$STAGING_DIR/${repo}.zip" -d "$STAGING_DIR/${repo}" >/dev/null
     rbf_inside="$(find "$STAGING_DIR/${repo}" -maxdepth 4 -type f -name '*.rbf' | head -1)"
-    [ -n "$rbf_inside" ] || { echo "  ERR: No .rbf found inside $asset_filename" >&2; continue; }
+    if [ -z "$rbf_inside" ]; then
+      echo "  ERR: No .rbf found inside $asset_filename" >&2
+      skipped_cores="${skipped_cores}${repo} (no .rbf inside zip)\n"
+      old_entry="$([ -n "$existing_manifest" ] && grep "^${repo}|" "$existing_manifest" 2>/dev/null || true)"
+      [ -n "$old_entry" ] && manifest_lines="${manifest_lines}${old_entry}\n"
+      continue
+    fi
     cp "$rbf_inside" "$staged_rbf"
   fi
 
@@ -417,15 +435,62 @@ fi
 
 # Upload the config bundled in the Main_MiSTer release, only if one doesn't
 # already exist on the MiSTer.
-if ! ftp_ls "/media/fat/" 2>/dev/null | grep -qE "\\sretroachievements\\.cfg\$"; then
+CREDENTIALS_SET=0
+CFG_JUST_IMPORTED=0
+if ! ftp_ls /media/fat/ 2>/dev/null | grep -qE '\sretroachievements\.cfg$'; then
   if [ -n "$MAIN_CFG" ]; then
     ftp_put "$MAIN_CFG" "/media/fat/retroachievements.cfg"
-    echo "  Uploaded retroachievements.cfg  ← fill this in before using RA!"
+    echo "  Uploaded retroachievements.cfg"
+    CFG_JUST_IMPORTED=1
   else
     echo "  WARN: retroachievements.cfg not found in the Main_MiSTer release — skipping" >&2
   fi
 else
   echo "  retroachievements.cfg already present — leaving untouched"
+fi
+
+# Prompt for credentials. If the cfg was just imported it will have blank
+# fields by design, so skip the blank check and always prompt. For an
+# existing cfg, only prompt if a field is actually empty.
+tmp_cfg_check="$STAGING_DIR/retroachievements.cfg"
+PROMPT_CREDS=0
+if [ "$CFG_JUST_IMPORTED" = "1" ]; then
+  PROMPT_CREDS=1
+elif ftp_get "/media/fat/retroachievements.cfg" "$tmp_cfg_check" 2>/dev/null; then
+  cfg_username="$(grep '^username=' "$tmp_cfg_check" | cut -d= -f2 | tr -d '[:space:]')"
+  cfg_password="$(grep '^password=' "$tmp_cfg_check" | cut -d= -f2 | tr -d '[:space:]')"
+  if [ -z "$cfg_username" ] || [ -z "$cfg_password" ]; then
+    PROMPT_CREDS=1
+  else
+    echo "  Credentials already set — leaving untouched"
+    CREDENTIALS_SET=1
+  fi
+fi
+
+if [ "$PROMPT_CREDS" = "1" ]; then
+  # Ensure we have a local copy to edit.
+  if [ "$CFG_JUST_IMPORTED" = "0" ]; then
+    ftp_get "/media/fat/retroachievements.cfg" "$tmp_cfg_check" 2>/dev/null || true
+  else
+    cp "$MAIN_CFG" "$tmp_cfg_check"
+  fi
+  echo
+  printf "  RetroAchievements credentials are not set. Enter them now? [y/n]: "
+  read -r enter_creds
+  if [ "$enter_creds" = "y" ] || [ "$enter_creds" = "Y" ]; then
+    printf "  Username: "
+    read -r ra_username
+    printf "  Password: "
+    read -rs ra_password
+    echo
+    sed -i "s/^username=.*/username=${ra_username}/" "$tmp_cfg_check"
+    sed -i "s/^password=.*/password=${ra_password}/" "$tmp_cfg_check"
+    ftp_put "$tmp_cfg_check" "/media/fat/retroachievements.cfg"
+    echo "  Credentials saved to retroachievements.cfg"
+    CREDENTIALS_SET=1
+  else
+    echo "  Skipping — remember to edit /media/fat/retroachievements.cfg before launching a game."
+  fi
 fi
 
 # Fetch remote directory listings once so we can check file existence without
@@ -444,14 +509,19 @@ for rbf_file in "$STAGING_DIR"/cores/*.rbf; do
   remote_name="$(basename "$rbf_file")"
   core_name="${remote_name%.rbf}"
 
+  # Look up this core's release tag from the manifest we just built,
+  # rather than relying on $release_tag which may be stale from the last
+  # iteration of the download loop.
+  core_release_tag="$(echo "$manifest_lines" | grep "^${core_name}_MiSTer|" | cut -d'|' -f5 | head -1)"
+
   # Upload the core binary only if it isn't already on the MiSTer or the
   # release tag is newer than what's installed.
   current_tag="$(installed_tag "${core_name}_MiSTer")"
-  if echo "$remote_cores_dir" | grep -qF "$remote_name" && [ -n "$current_tag" ] && [ "$current_tag" = "$release_tag" ]; then
-    echo "  Cores/$remote_name already at $release_tag — skipping"
+  if echo "$remote_cores_dir" | grep -qF "$remote_name" && [ -n "$current_tag" ] && [ "$current_tag" = "$core_release_tag" ]; then
+    echo "  Cores/$remote_name already at $core_release_tag — skipping"
   else
     ftp_put "$rbf_file" "/media/fat/_RA_Cores/Cores/$remote_name"
-    echo "  Uploaded Cores/$remote_name  (tag: $release_tag)"
+    echo "  Uploaded Cores/$remote_name  (tag: $core_release_tag)"
   fi
 
   # Upload the .mgl launcher only if it isn't already on the MiSTer.
@@ -515,10 +585,25 @@ fi
 cat <<EOF
 
 == Install complete ==
+EOF
 
+if [ -n "$skipped_cores" ]; then
+  echo "  WARNING: the following cores had errors and were skipped:"
+  printf "  %b" "$skipped_cores" | sed 's/^/  /'
+fi
+
+if [ "$CREDENTIALS_SET" = "1" ]; then
+  cat <<EOF
 Next steps:
-  1. Edit /media/fat/retroachievements.cfg on the MiSTer and replace the
-     placeholder values with your RetroAchievements username and password.
+  1. Reboot the MiSTer so the new MiSTer.ini settings take effect.
+
+  2. Launch a game on a supported system to confirm achievements load.
+EOF
+else
+  cat <<EOF
+Next steps:
+  1. Edit /media/fat/retroachievements.cfg on the MiSTer and fill in your
+     RetroAchievements username and password before launching any games.
      (Use your real account password — not a Web API key. The rcheevos client
      only sends it on first login, then caches a session token.)
 
@@ -526,3 +611,4 @@ Next steps:
 
   3. Launch a game on a supported system to confirm achievements load.
 EOF
+fi
