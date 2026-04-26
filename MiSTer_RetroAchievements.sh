@@ -249,7 +249,7 @@ if ftp_get "/media/fat/_RA_Cores/.manifest" "$tmp_existing_main" 2>/dev/null; th
 fi
 
 if [ -n "$installed_main_tag" ] && [ "$installed_main_tag" = "$main_tag" ]; then
-  echo "  MiSTer_RA.ra already at $main_tag — skipping download"
+  echo "  MiSTer_RA already at $main_tag — skipping download"
   MAIN_BINARY=""
   MAIN_WAV=""
   MAIN_CFG=""
@@ -406,10 +406,10 @@ ftp_mkdir "/media/fat/_RA_Cores"
 
 # Upload the modified MiSTer binary only if it's new or updated.
 if [ -n "$MAIN_BINARY" ]; then
-  ftp_put "$MAIN_BINARY" "/media/fat/_RA_Cores/MiSTer_RA.ra"
-  echo "  Uploaded MiSTer_RA.ra  (tag: $main_tag)"
+  ftp_put "$MAIN_BINARY" "/media/fat/MiSTer_RA"
+  echo "  Uploaded MiSTer_RA  (tag: $main_tag)"
 else
-  echo "  MiSTer_RA.ra already at $main_tag — skipping"
+  echo "  MiSTer_RA already at $main_tag — skipping"
 fi
 
 # Upload the achievement sound effect if it was bundled in the release.
