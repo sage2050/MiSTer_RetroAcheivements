@@ -1,5 +1,5 @@
-# MiSTer_RetroAcheivements
-Install script to get RA enabled cores onto your MiSTer
+# AI Disclaimer
+vibed out with claude code sonnet 4.6
 
 # MiSTer FPGA RetroAchievements Installer
 
