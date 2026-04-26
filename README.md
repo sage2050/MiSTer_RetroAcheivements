@@ -5,7 +5,7 @@ Install script to get RA enabled cores onto your MiSTer
 
 A workstation-side install script that bootstraps [odelot's RetroAchievements-enabled MiSTer binaries](https://github.com/odelot/Main_MiSTer) onto a MiSTer FPGA over FTP. Run it from your Linux, macOS, or WSL machine — nothing needs to run on the MiSTer itself.
 
-> Based on [mister-fpga-retroachievements](https://github.com/manyhats-mike/mister-fpga-retroachievements) by manyhats-mike.
+> Based on [mister-fpga-retroachievements](https://github.com/manyhats-mike/mister-fpga-retroachievements) by manyhats-mike. and [suggestion by smeg-of-lister](https://github.com/manyhats-mike/mister-fpga-retroachievements/issues/1)
 
 ---
 
