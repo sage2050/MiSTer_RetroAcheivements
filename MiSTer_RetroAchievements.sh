@@ -80,7 +80,6 @@ GITHUB_USER="odelot"
 GITHUB_API="https://api.github.com"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 echo "MiSTer_RetroAchievements.sh v${SCRIPT_VERSION}"
 echo "Target:  ftp://${MISTER_USER}@${MISTER_HOST}/"
@@ -219,6 +218,15 @@ fi
 # Step 1: Download the latest odelot/Main_MiSTer release
 # ─────────────────────────────────────────────
 
+# Fetch the existing manifest once upfront — used in both Step 1 (main binary
+# tag check) and Step 2 (core tag checks) to avoid duplicate FTP calls.
+existing_manifest="$STAGING_DIR/existing_manifest.txt"
+if ftp_get "/media/fat/_RA_Cores/.manifest" "$existing_manifest" 2>/dev/null; then
+  echo "  Fetched existing manifest"
+else
+  existing_manifest=""
+fi
+
 echo "== Step 1: Downloading odelot/Main_MiSTer =="
 
 curl -sSL -o "$STAGING_DIR/main_release.json" \
@@ -241,24 +249,17 @@ main_tag="$(json_string "tag_name" "$STAGING_DIR/main_release.json")"
 
 echo "  Release tag: $main_tag"
 
-# Check the installed main binary tag from the manifest if one exists.
-installed_main_tag=""
-tmp_existing_main="$STAGING_DIR/existing_manifest_main.txt"
-if ftp_get "/media/fat/_RA_Cores/.manifest" "$tmp_existing_main" 2>/dev/null; then
-  installed_main_tag="$(grep '^# main_tag=' "$tmp_existing_main" 2>/dev/null | cut -d= -f2 | head -1)"
-fi
+# Check the installed main binary tag from the manifest fetched above.
+installed_main_tag="$(grep '^# main_tag=' "$existing_manifest" 2>/dev/null | cut -d= -f2 | head -1)"
 
 if [ -n "$installed_main_tag" ] && [ "$installed_main_tag" = "$main_tag" ]; then
   echo "  MiSTer_RA already at $main_tag — skipping binary download"
   MAIN_BINARY=""
   MAIN_WAV=""
-  # Still need the zip for retroachievements.cfg in case it's missing on the MiSTer.
-  # Only download if we don't already have it staged from a previous run.
-  if [ ! -f "$STAGING_DIR/main.zip" ]; then
-    echo "  Downloading zip for cfg extraction..."
-    curl --progress-bar -L -o "$STAGING_DIR/main.zip" "$main_download_url"
-    unzip -o "$STAGING_DIR/main.zip" -d "$STAGING_DIR/main" >/dev/null
-  fi
+  # Download the zip solely to extract retroachievements.cfg.
+  echo "  Downloading zip for cfg extraction..."
+  curl --progress-bar -L -o "$STAGING_DIR/main.zip" "$main_download_url"
+  unzip -o "$STAGING_DIR/main.zip" -d "$STAGING_DIR/main" >/dev/null
   MAIN_CFG="$(find "$STAGING_DIR/main" -maxdepth 3 -type f -name retroachievements.cfg | head -1)"
 else
   echo "  Downloading binary zip..."
@@ -318,14 +319,11 @@ fi
 
 echo "  Found cores: $(echo "$core_repos" | tr '\n' ' ')"
 
-# Pull the existing manifest from the MiSTer so we can skip cores that are
-# already up to date. If none exists yet (first run) this is a no-op.
-existing_manifest="$STAGING_DIR/existing_manifest.txt"
-if ftp_get "/media/fat/_RA_Cores/.manifest" "$existing_manifest" 2>/dev/null; then
+# Use the manifest already fetched above for core tag comparisons.
+if [ -n "$existing_manifest" ]; then
   echo "  Found existing manifest — will skip cores already at latest tag"
 else
   echo "  No existing manifest — all cores will be downloaded"
-  existing_manifest=""
 fi
 
 # Look up the installed tag for a given repo from the manifest.
@@ -338,6 +336,10 @@ installed_tag() {
 
 manifest_lines=""
 skipped_cores=""
+# Temp file used to pass per-core release tags from the download loop to the
+# upload loop without re-grepping manifest_lines for every core.
+core_tags_file="$STAGING_DIR/core_tags.txt"
+: > "$core_tags_file"
 
 for repo in $core_repos; do
   echo "-- $repo --"
@@ -377,6 +379,7 @@ for repo in $core_repos; do
   current_tag="$(installed_tag "$repo")"
   if [ -n "$current_tag" ] && [ "$current_tag" = "$release_tag" ]; then
     echo "  Already at $release_tag — skipping download"
+    echo "${core_name}=${release_tag}" >> "$core_tags_file"
     # Still need this core in the manifest even if we didn't re-download it.
     if [ -n "$rbf_url" ]; then
       asset_filename="$(basename "$rbf_url")"
@@ -409,6 +412,7 @@ for repo in $core_repos; do
   fi
 
   echo "  Staged ${core_name}.rbf  (tag: $release_tag)"
+  echo "${core_name}=${release_tag}" >> "$core_tags_file"
 
   manifest_lines="${manifest_lines}${repo}|${core_name}|/media/fat/_Console|${core_name}_*.rbf|${release_tag}|${asset_filename}
 "
@@ -483,8 +487,8 @@ if [ "$PROMPT_CREDS" = "1" ]; then
     printf "  Password: "
     read -rs ra_password
     echo
-    sed -i "s/^username=.*/username=${ra_username}/" "$tmp_cfg_check"
-    sed -i "s/^password=.*/password=${ra_password}/" "$tmp_cfg_check"
+    sed -i'' "s/^username=.*/username=${ra_username}/" "$tmp_cfg_check"
+    sed -i'' "s/^password=.*/password=${ra_password}/" "$tmp_cfg_check"
     ftp_put "$tmp_cfg_check" "/media/fat/retroachievements.cfg"
     echo "  Credentials saved to retroachievements.cfg"
     CREDENTIALS_SET=1
@@ -509,10 +513,8 @@ for rbf_file in "$STAGING_DIR"/cores/*.rbf; do
   remote_name="$(basename "$rbf_file")"
   core_name="${remote_name%.rbf}"
 
-  # Look up this core's release tag from the manifest we just built,
-  # rather than relying on $release_tag which may be stale from the last
-  # iteration of the download loop.
-  core_release_tag="$(echo "$manifest_lines" | grep "^${core_name}_MiSTer|" | cut -d'|' -f5 | head -1)"
+  # Look up this core's release tag written during the download loop.
+  core_release_tag="$(grep "^${core_name}=" "$core_tags_file" | cut -d= -f2 | head -1)"
 
   # Upload the core binary only if it isn't already on the MiSTer or the
   # release tag is newer than what's installed.
@@ -577,6 +579,14 @@ EOF
     echo "  Appended [RA_*] block to MiSTer.ini"
   fi
 fi
+
+# ─────────────────────────────────────────────
+# Cleanup
+# ─────────────────────────────────────────────
+
+echo "== Cleaning up staging directory =="
+rm -rf "$STAGING_DIR"
+echo "  Removed $STAGING_DIR"
 
 # ─────────────────────────────────────────────
 # Done
