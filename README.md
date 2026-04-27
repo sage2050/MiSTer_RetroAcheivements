@@ -17,6 +17,9 @@ A workstation-side install script that bootstraps [odelot's RetroAchievements-en
 
 Files are placed under `/media/fat/_RA_Cores/` and left completely separate from your stock setup, so nothing is overwritten.
 
+MiSTer_RA - runs locally on the mister (place in Scripts folder)
+MiSTer_RetroAchievements.sh - runs on remote workstation (will be deprecated when local script is tested more)
+
 ---
 
 ## Requirements
