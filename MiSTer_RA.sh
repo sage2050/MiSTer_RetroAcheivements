@@ -464,8 +464,11 @@ echo "  Wrote .manifest"
 echo "== Step 4: Updating MiSTer.ini =="
 
 if [ ! -f "$FAT/MiSTer.ini" ]; then
-  echo "  ERR: $FAT/MiSTer.ini not found — skipping" >&2
-elif grep -q "^\[RA_\*\]" "$FAT/MiSTer.ini"; then
+  echo "  MiSTer.ini not found — creating it"
+  [ "$DRY_RUN" = "0" ] && : > "$FAT/MiSTer.ini"
+fi
+
+if grep -q "^\[RA_\*\]" "$FAT/MiSTer.ini" 2>/dev/null; then
   echo "  [RA_*] block already present — leaving untouched"
 else
   if [ "$DRY_RUN" = "0" ]; then
