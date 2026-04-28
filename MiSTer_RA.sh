@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# MiSTer_RetroAchievements_local.sh - Bootstrap the mister-fpga-retroachievements
+# MiSTer_RA.sh - Bootstrap the mister-fpga-retroachievements
 # toolkit directly on the MiSTer. Run this from a MiSTer shell session.
 #
 # What it does:
@@ -10,7 +10,7 @@
 #   3. Appends an [RA_*] section to /media/fat/MiSTer.ini to load RA cores with the RA main.
 #
 # Usage:
-#   ./MiSTer_RetroAchievements_local.sh [options]
+#   ./MiSTer_RA.sh [options]
 #
 # Flags:
 #   -v, --verbose   Print each file operation as it runs
@@ -34,7 +34,7 @@ DRY_RUN=0
 
 usage() {
   cat <<USAGE
-Usage: ./MiSTer_RetroAchievements_local.sh [options]
+Usage: ./MiSTer_RA.sh [options]
 
 Options:
   -v, --verbose   Print each file operation as it runs
@@ -66,7 +66,7 @@ FAT="/media/fat"
 GITHUB_USER="odelot"
 GITHUB_API="https://api.github.com"
 
-echo "MiSTer_RetroAchievements_local.sh v${SCRIPT_VERSION}"
+echo "MiSTer_RA.sh v${SCRIPT_VERSION}"
 echo "Staging: $STAGING_DIR"
 [ "$DRY_RUN" = "1" ] && echo "Mode:    DRY RUN — no files will be written"
 [ "$VERBOSE" = "1" ] && echo "Mode:    VERBOSE — file operations will be printed"
