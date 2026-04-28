@@ -564,20 +564,21 @@ echo "== Step 4: Updating MiSTer.ini =="
 
 tmp_ini="$STAGING_DIR/MiSTer.ini"
 
-if ! ftp_get "/media/fat/MiSTer.ini" "$tmp_ini"; then
-  echo "  ERR: Could not download /media/fat/MiSTer.ini — skipping" >&2
+if ! ftp_get "/media/fat/MiSTer.ini" "$tmp_ini" 2>/dev/null; then
+  echo "  MiSTer.ini not found — creating it"
+  : > "$tmp_ini"
+fi
+
+if grep -q "^\[RA_\*\]" "$tmp_ini"; then
+  echo "  [RA_*] block already present — leaving untouched"
 else
-  if grep -q "^\[RA_\*\]" "$tmp_ini"; then
-    echo "  [RA_*] block already present — leaving untouched"
-  else
-    cat >> "$tmp_ini" <<'EOF'
+  cat >> "$tmp_ini" <<'EOF'
 
 [RA_*]
 main=MiSTer_RA
 EOF
-    ftp_put "$tmp_ini" "/media/fat/MiSTer.ini"
-    echo "  Appended [RA_*] block to MiSTer.ini"
-  fi
+  ftp_put "$tmp_ini" "/media/fat/MiSTer.ini"
+  echo "  Appended [RA_*] block to MiSTer.ini"
 fi
 
 # ─────────────────────────────────────────────
