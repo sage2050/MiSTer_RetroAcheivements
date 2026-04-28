@@ -252,7 +252,12 @@ echo "  Release tag: $main_tag"
 # Check the installed main binary tag from the manifest fetched above.
 installed_main_tag="$(grep '^# main_tag=' "$existing_manifest" 2>/dev/null | cut -d= -f2 | head -1)"
 
-if [ -n "$installed_main_tag" ] && [ "$installed_main_tag" = "$main_tag" ]; then
+mister_ra_exists=0
+if ftp_ls "/media/fat/" 2>/dev/null | grep -qF "MiSTer_RA"; then
+  mister_ra_exists=1
+fi
+
+if [ -n "$installed_main_tag" ] && [ "$installed_main_tag" = "$main_tag" ] && [ "$mister_ra_exists" = "1" ]; then
   echo "  MiSTer_RA already at $main_tag — skipping binary download"
   MAIN_BINARY=""
   MAIN_WAV=""
@@ -382,7 +387,7 @@ for repo in $core_repos; do
 
   # Skip downloading if the installed tag matches the latest release tag.
   current_tag="$(installed_tag "$repo")"
-  if [ -n "$current_tag" ] && [ "$current_tag" = "$release_tag" ]; then
+  if [ -n "$current_tag" ] && [ "$current_tag" = "$release_tag" ] && [ -f "$staged_rbf" ]; then
     echo "  Already at $release_tag — skipping download"
     echo "${core_name}=${release_tag}" >> "$core_tags_file"
     # Still need this core in the manifest even if we didn't re-download it.
@@ -524,7 +529,7 @@ for rbf_file in "$STAGING_DIR"/cores/*.rbf; do
   # Upload the core binary only if it isn't already on the MiSTer or the
   # release tag is newer than what's installed.
   current_tag="$(installed_tag "${core_name}_MiSTer")"
-  if echo "$remote_cores_dir" | grep -qF "$remote_name" && [ -n "$current_tag" ] && [ "$current_tag" = "$core_release_tag" ]; then
+  if echo "$remote_cores_dir" | grep -qF "$remote_name" && [ -n "$core_release_tag" ] && [ "$current_tag" = "$core_release_tag" ]; then
     echo "  Cores/$remote_name already at $core_release_tag — skipping"
   else
     ftp_put "$rbf_file" "/media/fat/_RA_Cores/Cores/$remote_name"

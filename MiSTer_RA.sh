@@ -180,7 +180,7 @@ echo "  Release tag: $main_tag"
 # Check the installed main binary tag from the manifest fetched above.
 installed_main_tag="$(grep '^# main_tag=' "$existing_manifest" 2>/dev/null | cut -d= -f2 | head -1)"
 
-if [ -n "$installed_main_tag" ] && [ "$installed_main_tag" = "$main_tag" ]; then
+if [ -n "$installed_main_tag" ] && [ "$installed_main_tag" = "$main_tag" ] && [ -f "$FAT/MiSTer_RA" ]; then
   echo "  MiSTer_RA already at $main_tag — skipping binary download"
   MAIN_BINARY=""
   MAIN_WAV=""
@@ -299,7 +299,7 @@ for repo in $core_repos; do
   staged_rbf="$STAGING_DIR/cores/${core_name}.rbf"
 
   current_tag="$(installed_tag "$repo")"
-  if [ -n "$current_tag" ] && [ "$current_tag" = "$release_tag" ]; then
+  if [ -n "$current_tag" ] && [ "$current_tag" = "$release_tag" ] && [ -f "$staged_rbf" ]; then
     echo "  Already at $release_tag — skipping download"
     echo "${core_name}=${release_tag}" >> "$core_tags_file"
     if [ -n "$rbf_url" ]; then
