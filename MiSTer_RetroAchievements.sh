@@ -304,6 +304,11 @@ if [ -z "$core_repos" ]; then
   echo "  No *_MiSTer repos found in user listing — trying GitHub search API..."
   curl -sSL -o "$STAGING_DIR/repos_search.json" \
     "$GITHUB_API/search/repositories?q=user:${GITHUB_USER}+MiSTer+in:name&per_page=100"
+  if grep -q '"message"' "$STAGING_DIR/repos_search.json"; then
+    api_msg="$(json_string "message" "$STAGING_DIR/repos_search.json")"
+    echo "ERR: GitHub search API error: $api_msg" >&2
+    exit 1
+  fi
   core_repos="$(
     grep -oE '"name"[[:space:]]*:[[:space:]]*"[^"]*MiSTer[^"]*"' "$STAGING_DIR/repos_search.json" \
       | sed -E 's/.*"([^"]*)".*/\1/' \
