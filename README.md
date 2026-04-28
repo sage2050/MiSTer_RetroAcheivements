@@ -1,73 +1,98 @@
 # AI Disclaimer
-vibed out with claude code sonnet 4.6
+vibed out with claude sonnet 4.6
 
 # MiSTer FPGA RetroAchievements Installer
 
-A workstation-side install script that bootstraps [odelot's RetroAchievements-enabled MiSTer binaries](https://github.com/odelot/Main_MiSTer) onto a MiSTer FPGA over FTP. Run it from your Linux, macOS, or WSL machine — nothing needs to run on the MiSTer itself.
+Installs [odelot's RetroAchievements-enabled MiSTer binaries](https://github.com/odelot/Main_MiSTer) onto a MiSTer FPGA. Two scripts are provided depending on how you prefer to run it.
 
-> Based on [mister-fpga-retroachievements](https://github.com/manyhats-mike/mister-fpga-retroachievements) by manyhats-mike. and [suggestion by smeg-of-lister](https://github.com/manyhats-mike/mister-fpga-retroachievements/issues/1)
+> Based on [mister-fpga-retroachievements](https://github.com/manyhats-mike/mister-fpga-retroachievements) by manyhats-mike and [suggestion by smeg-of-lister](https://github.com/manyhats-mike/mister-fpga-retroachievements/issues/1).
+
+---
+
+## Scripts
+
+### `MiSTer_RA.sh` — runs directly on the MiSTer
+Place in `/media/fat/Scripts/` and run from the MiSTer's Scripts menu or a shell session. No workstation needed.
+
+### `MiSTer_RetroAchievements.sh` — runs from a workstation
+Run from your Linux, macOS, or WSL machine. Transfers files to the MiSTer over FTP. Useful if you prefer not to run scripts directly on the device.
 
 ---
 
 ## What it does
 
-1. Downloads the latest `odelot/Main_MiSTer` binary and every published RA-enabled core `.rbf` (NES, SNES, Genesis, SMS, GB, N64, PSX, and any others auto-discovered from GitHub at install time).
-2. Uploads the modified binary, cores, `achievement.wav`, a starter `retroachievements.cfg`, `.mgl` launchers, and an install manifest to the MiSTer over FTP.
-3. Appends an `[RA_*]` section to `/media/fat/MiSTer.ini` so MiSTer knows to use the RA binary for those cores.
+1. Downloads the latest `odelot/Main_MiSTer` binary and every published RA-enabled core `.rbf` — auto-discovered from GitHub at install time.
+2. Installs the modified binary, cores, `achievement.wav`, `retroachievements.cfg`, `.mgl` launchers, and an install manifest.
+3. Appends an `[RA_*]` section to `/media/fat/MiSTer.ini` so MiSTer loads the RA binary for supported cores.
 
-Files are placed under `/media/fat/_RA_Cores/` and left completely separate from your stock setup, so nothing is overwritten.
+On subsequent runs, installed versions are compared against the latest GitHub release tags and only updated if a newer release is available.
 
-MiSTer_RA.sh - runs locally on the mister (place in Scripts folder)  
-MiSTer_RetroAchievements.sh - runs on remote workstation (will be deprecated when local script is tested more)  
+Files are placed under `/media/fat/_RA_Cores/` and kept completely separate from your stock setup.
 
 ---
 
 ## Requirements
 
+Both scripts require:
 - `curl`
 - `unzip`
+
+The workstation script additionally requires:
 - `awk`
-- FTP enabled on the MiSTer (it's on by default)
+- FTP enabled on the MiSTer (on by default)
 
 ---
 
 ## Usage
 
+### MiSTer_RA.sh (local)
+
+```bash
+./MiSTer_RA.sh
+```
+
+Prompts for RetroAchievements credentials during install. Offers to reboot at the end.
+
+| Flag | Description |
+|------|-------------|
+| `-v`, `--verbose` | Print each file operation as it runs |
+| `-n`, `--dry-run` | Download and stage files but skip all writes |
+| `-h`, `--help` | Show usage and exit |
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `STAGING_DIR` | `/tmp/ra_staging` | Scratch directory (cleaned up after each run) |
+
+### MiSTer_RetroAchievements.sh (workstation)
+
 ```bash
 ./MiSTer_RetroAchievements.sh
 ```
 
-The script will prompt for your MiSTer's IP address interactively.
+Prompts for the MiSTer's IP address interactively. Can also be set via environment variable to skip the prompt:
 
-### Flags
+```bash
+MISTER_HOST=192.168.1.42 ./MiSTer_RetroAchievements.sh
+```
 
 | Flag | Description |
 |------|-------------|
 | `-v`, `--verbose` | Print each FTP command as it runs |
-| `-n`, `--dry-run` | Download and stage files locally but skip all FTP writes |
+| `-n`, `--dry-run` | Download and stage files but skip all FTP writes |
 | `-h`, `--help` | Show usage and exit |
-
-### Environment variables
-
-These are all optional. Set them if you want to override the defaults.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `MISTER_HOST` | _(prompted)_ | MiSTer IP address |
 | `MISTER_USER` | `root` | FTP username |
 | `MISTER_PASS` | `1` | FTP password |
-| `STAGING_DIR` | `./staging` | Local working directory for downloaded files |
-
-Example — non-interactive run with a custom password:
-
-```bash
-MISTER_PASS=mypassword ./MiSTer_RetroAchievements.sh
-```
+| `STAGING_DIR` | `./staging` | Scratch directory (cleaned up after each run) |
 
 ---
 
 ## After installation
 
-1. **Edit `/media/fat/retroachievements.cfg`** on the MiSTer and fill in your RetroAchievements username and password. Use your real account password, not a Web API key — the rcheevos client only sends it on first login and then caches a session token.
+1. **Fill in your credentials** — the script will prompt during install, or edit `/media/fat/retroachievements.cfg` manually. Use your real account password, not a Web API key.
 
 2. **Reboot the MiSTer** so the updated `MiSTer.ini` settings take effect.
 
@@ -80,10 +105,11 @@ MISTER_PASS=mypassword ./MiSTer_RetroAchievements.sh
 ```
 /media/fat/
 ├── MiSTer.ini                  ← [RA_*] block appended here
+├── MiSTer_RA                   ← odelot's modified MiSTer binary
 ├── retroachievements.cfg       ← your RA credentials go here
 ├── achievement.wav             ← unlock sound effect
 └── _RA_Cores/
-    ├── MiSTer_RA.ra            ← odelot's modified MiSTer binary
+    ├── .manifest               ← installed version tracking
     ├── NES.mgl                 ← .mgl launcher per core
     ├── SNES.mgl
     ├── ...
@@ -98,4 +124,4 @@ MISTER_PASS=mypassword ./MiSTer_RetroAchievements.sh
 ## Credits
 
 - [odelot](https://github.com/odelot) — RetroAchievements-enabled MiSTer binary and cores
-- [manyhats-mike](https://github.com/manyhats-mike/mister-fpga-retroachievements) — original project this script is based on
+- [manyhats-mike](https://github.com/manyhats-mike/mister-fpga-retroachievements) — original project this is based on
