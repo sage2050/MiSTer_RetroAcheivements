@@ -58,7 +58,7 @@ done
 # Configuration
 # ─────────────────────────────────────────────
 
-SCRIPT_VERSION="0.3.0"
+SCRIPT_VERSION="0.4.0"
 
 STAGING_DIR="${STAGING_DIR:-/tmp/ra_staging}"
 FAT="/media/fat"
@@ -180,24 +180,38 @@ echo "  Release tag: $main_tag"
 # Check the installed main binary tag from the manifest fetched above.
 installed_main_tag="$(grep '^# main_tag=' "$existing_manifest" 2>/dev/null | cut -d= -f2 | head -1)"
 
-if [ -n "$installed_main_tag" ] && [ "$installed_main_tag" = "$main_tag" ] && [ -f "$FAT/MiSTer_RA" ]; then
-  echo "  MiSTer_RA already at $main_tag — skipping binary download"
-  MAIN_BINARY=""
-  MAIN_WAV=""
-  # Download the zip solely to extract retroachievements.cfg.
-  echo "  Downloading zip for cfg extraction..."
-  $CURL --progress-bar -L -o "$STAGING_DIR/main.zip" "$main_download_url"
-  unzip -o "$STAGING_DIR/main.zip" -d "$STAGING_DIR/main" >/dev/null
-  MAIN_CFG="$(find "$STAGING_DIR/main" -maxdepth 3 -type f -name retroachievements.cfg | head -1)"
+binary_current=0
+[ -n "$installed_main_tag" ] && [ "$installed_main_tag" = "$main_tag" ] && [ -f "$FAT/MiSTer_RA" ] \
+  && binary_current=1
+
+cfg_exists=0
+[ -f "$FAT/retroachievements.cfg" ] && cfg_exists=1
+
+MAIN_BINARY=""
+MAIN_WAV=""
+MAIN_CFG=""
+
+if [ "$binary_current" = "1" ] && [ "$cfg_exists" = "1" ]; then
+  echo "  MiSTer_RA already at $main_tag and retroachievements.cfg present — skipping download"
+elif [ "$binary_current" = "1" ]; then
+  echo "  MiSTer_RA already at $main_tag — fetching cfg only"
+  cfg_raw_url="https://raw.githubusercontent.com/$GITHUB_USER/Main_MiSTer/$main_tag/retroachievements.cfg"
+  staged_cfg="$STAGING_DIR/retroachievements.cfg"
+  if $CURL -sSL --fail -o "$staged_cfg" "$cfg_raw_url" 2>/dev/null; then
+    MAIN_CFG="$staged_cfg"
+  else
+    echo "  WARN: cfg not found at raw URL — falling back to zip" >&2
+    $CURL --progress-bar -L -o "$STAGING_DIR/main.zip" "$main_download_url"
+    unzip -o "$STAGING_DIR/main.zip" -d "$STAGING_DIR/main" >/dev/null
+    MAIN_CFG="$(find "$STAGING_DIR/main" -maxdepth 3 -type f -name retroachievements.cfg | head -1)"
+  fi
 else
   echo "  Downloading binary zip..."
   $CURL --progress-bar -L -o "$STAGING_DIR/main.zip" "$main_download_url"
   unzip -o "$STAGING_DIR/main.zip" -d "$STAGING_DIR/main" >/dev/null
-
   MAIN_BINARY="$(find "$STAGING_DIR/main" -maxdepth 3 -type f -name MiSTer | head -1)"
   MAIN_WAV="$(find "$STAGING_DIR/main" -maxdepth 3 -type f -name achievement.wav | head -1)"
   MAIN_CFG="$(find "$STAGING_DIR/main" -maxdepth 3 -type f -name retroachievements.cfg | head -1)"
-
   [ -n "$MAIN_BINARY" ] || {
     echo "ERR: MiSTer binary not found inside the downloaded zip." >&2
     exit 1
@@ -257,6 +271,7 @@ else
   echo "  No existing manifest — all cores will be downloaded"
 fi
 
+# Look up the installed tag for a given repo from the manifest.
 installed_tag() {
   local repo="$1"
   [ -n "$existing_manifest" ] || return 0
@@ -298,8 +313,10 @@ for repo in $core_repos; do
   core_name="${repo%_MiSTer}"
   staged_rbf="$STAGING_DIR/cores/${core_name}.rbf"
 
+  # Skip download if the installed tag matches and the .rbf is already on the MiSTer.
   current_tag="$(installed_tag "$repo")"
-  if [ -n "$current_tag" ] && [ "$current_tag" = "$release_tag" ] && [ -f "$staged_rbf" ]; then
+  if [ -n "$current_tag" ] && [ "$current_tag" = "$release_tag" ] \
+      && [ -f "$FAT/_RA_Cores/Cores/${core_name}.rbf" ]; then
     echo "  Already at $release_tag — skipping download"
     echo "${core_name}=${release_tag}" >> "$core_tags_file"
     if [ -n "$rbf_url" ]; then
