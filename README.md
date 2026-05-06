@@ -3,19 +3,9 @@ vibed out with claude sonnet 4.6
 
 # MiSTer FPGA RetroAchievements Installer
 
-Installs [odelot's RetroAchievements-enabled MiSTer binaries](https://github.com/odelot/Main_MiSTer) onto a MiSTer FPGA. Two scripts are provided depending on how you prefer to run it.
+Installs [odelot's RetroAchievements-enabled MiSTer binaries](https://github.com/odelot/Main_MiSTer) onto a MiSTer FPGA.
 
 > Based on [mister-fpga-retroachievements](https://github.com/manyhats-mike/mister-fpga-retroachievements) by manyhats-mike and [suggestion by smeg-of-lister](https://github.com/manyhats-mike/mister-fpga-retroachievements/issues/1).
-
----
-
-## Scripts
-
-### `MiSTer_RA.sh` — runs directly on the MiSTer
-Place in `/media/fat/Scripts/` and run from the MiSTer's Scripts menu or a shell session. No workstation needed.
-
-### `MiSTer_RetroAchievements.sh` — runs from a workstation
-Run from your Linux, macOS, or WSL machine. Transfers files to the MiSTer over FTP. Useful if you prefer not to run scripts directly on the device.
 
 ---
 
@@ -33,19 +23,14 @@ Files are placed under `/media/fat/_RA_Cores/` and kept completely separate from
 
 ## Requirements
 
-Both scripts require:
 - `curl`
 - `unzip`
-
-The workstation script additionally requires:
-- `awk`
-- FTP enabled on the MiSTer (on by default)
 
 ---
 
 ## Usage
 
-### MiSTer_RA.sh (local)
+Place `MiSTer_RA.sh` in `/media/fat/Scripts/` and run it from the MiSTer's Scripts menu or a shell session.
 
 ```bash
 ./MiSTer_RA.sh
@@ -62,31 +47,6 @@ Prompts for RetroAchievements credentials during install. Offers to reboot at th
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `STAGING_DIR` | `/tmp/ra_staging` | Scratch directory (cleaned up after each run) |
-
-### MiSTer_RetroAchievements.sh (workstation)
-
-```bash
-./MiSTer_RetroAchievements.sh
-```
-
-Prompts for the MiSTer's IP address interactively. Can also be set via environment variable to skip the prompt:
-
-```bash
-MISTER_HOST=192.168.1.42 ./MiSTer_RetroAchievements.sh
-```
-
-| Flag | Description |
-|------|-------------|
-| `-v`, `--verbose` | Print each FTP command as it runs |
-| `-n`, `--dry-run` | Download and stage files but skip all FTP writes |
-| `-h`, `--help` | Show usage and exit |
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `MISTER_HOST` | _(prompted)_ | MiSTer IP address |
-| `MISTER_USER` | `root` | FTP username |
-| `MISTER_PASS` | `1` | FTP password |
-| `STAGING_DIR` | `./staging` | Scratch directory (cleaned up after each run) |
 
 ---
 
