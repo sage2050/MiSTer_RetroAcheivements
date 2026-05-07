@@ -304,7 +304,8 @@ for repo in $core_repos; do
 
   if [ -z "$rbf_url" ] && [ -z "$zip_url" ]; then
     echo "  No .rbf or .zip asset found — skipping"
-    skipped_cores="${skipped_cores}${repo} (no asset)\n"
+    skipped_cores="${skipped_cores}${repo} (no asset)
+"
     old_entry="$([ -n "$existing_manifest" ] && grep "^${repo}|" "$existing_manifest" 2>/dev/null || true)"
     [ -n "$old_entry" ] && manifest_lines="${manifest_lines}${old_entry}\n"
     continue
@@ -341,7 +342,8 @@ for repo in $core_repos; do
     rbf_inside="$(find "$STAGING_DIR/${repo}" -maxdepth 4 -type f -name '*.rbf' | head -1)"
     if [ -z "$rbf_inside" ]; then
       echo "  ERR: No .rbf found inside $asset_filename" >&2
-      skipped_cores="${skipped_cores}${repo} (no .rbf inside zip)\n"
+      skipped_cores="${skipped_cores}${repo} (no .rbf inside zip)
+"
       old_entry="$([ -n "$existing_manifest" ] && grep "^${repo}|" "$existing_manifest" 2>/dev/null || true)"
       [ -n "$old_entry" ] && manifest_lines="${manifest_lines}${old_entry}\n"
       continue
@@ -368,7 +370,7 @@ local_mkdir "$FAT/_RA_Cores/Cores"
 # Install the modified MiSTer binary only if it's new or updated.
 if [ -n "$MAIN_BINARY" ]; then
   local_put "$MAIN_BINARY" "$FAT/MiSTer_RA"
-  chmod +x "$FAT/MiSTer_RA"
+  [ "$DRY_RUN" = "0" ] && chmod +x "$FAT/MiSTer_RA"
   echo "  Installed MiSTer_RA  (tag: $main_tag)"
 else
   echo "  MiSTer_RA already at $main_tag — skipping"
@@ -421,9 +423,15 @@ if [ "$PROMPT_CREDS" = "1" ]; then
     printf "  Password: "
     read -rs ra_password
     echo
-    sed -i'' "s/^username=.*/username=${ra_username}/" "$FAT/retroachievements.cfg"
-    sed -i'' "s/^password=.*/password=${ra_password}/" "$FAT/retroachievements.cfg"
-    echo "  Credentials saved to retroachievements.cfg"
+    if [ "$DRY_RUN" = "0" ]; then
+      escaped_user="$(printf '%s\n' "$ra_username" | sed 's/[&/\]/\\&/g')"
+      escaped_pass="$(printf '%s\n' "$ra_password" | sed 's/[&/\]/\\&/g')"
+      sed -i'' "s/^username=.*/username=${escaped_user}/" "$FAT/retroachievements.cfg"
+      sed -i'' "s/^password=.*/password=${escaped_pass}/" "$FAT/retroachievements.cfg"
+      echo "  Credentials saved to retroachievements.cfg"
+    else
+      echo "    [dry-run] skipping credential write"
+    fi
     CREDENTIALS_SET=1
   else
     echo "  Skipping — remember to edit /media/fat/retroachievements.cfg before launching a game."
@@ -518,7 +526,7 @@ EOF
 
 if [ -n "$skipped_cores" ]; then
   echo "  WARNING: the following cores had errors and were skipped:"
-  printf "  %b" "$skipped_cores" | sed 's/^/  /'
+  printf "  %s" "$skipped_cores" | sed 's/^/  /'
 fi
 
 if [ "$CREDENTIALS_SET" = "1" ]; then
