@@ -31,6 +31,7 @@ set -eu
 
 VERBOSE=0
 DRY_RUN=0
+summary=""
 
 usage() {
   cat <<USAGE
@@ -191,10 +192,8 @@ MAIN_BINARY=""
 MAIN_WAV=""
 MAIN_CFG=""
 
-if [ "$binary_current" = "1" ] && [ "$cfg_exists" = "1" ]; then
-  echo "  MiSTer_RA already at $main_tag and retroachievements.cfg present — skipping download"
-elif [ "$binary_current" = "1" ]; then
-  echo "  MiSTer_RA already at $main_tag — fetching cfg only"
+if [ "$binary_current" = "1" ]; then
+  echo "  MiSTer_RA already at $main_tag — fetching reference cfg"
   cfg_raw_url="https://raw.githubusercontent.com/$GITHUB_USER/Main_MiSTer/$main_tag/retroachievements.cfg"
   staged_cfg="$STAGING_DIR/retroachievements.cfg"
   if $CURL -sSL --fail -o "$staged_cfg" "$cfg_raw_url" 2>/dev/null; then
@@ -372,6 +371,8 @@ if [ -n "$MAIN_BINARY" ]; then
   local_put "$MAIN_BINARY" "$FAT/MiSTer_RA"
   [ "$DRY_RUN" = "0" ] && chmod +x "$FAT/MiSTer_RA"
   echo "  Installed MiSTer_RA  (tag: $main_tag)"
+  summary="${summary}  MiSTer_RA binary: updated to ${main_tag}
+"
 else
   echo "  MiSTer_RA already at $main_tag — skipping"
 fi
@@ -380,6 +381,8 @@ fi
 if [ -n "$MAIN_WAV" ]; then
   local_put "$MAIN_WAV" "$FAT/achievement.wav"
   echo "  Installed achievement.wav"
+  summary="${summary}  achievement.wav: installed
+"
 fi
 
 # Install the config only if one doesn't already exist.
@@ -390,11 +393,50 @@ if [ ! -f "$FAT/retroachievements.cfg" ]; then
     local_put "$MAIN_CFG" "$FAT/retroachievements.cfg"
     echo "  Installed retroachievements.cfg"
     CFG_JUST_IMPORTED=1
+    summary="${summary}  retroachievements.cfg: installed
+"
   else
     echo "  WARN: retroachievements.cfg not found in the Main_MiSTer release — skipping" >&2
   fi
 else
-  echo "  retroachievements.cfg already present — leaving untouched"
+  echo "  retroachievements.cfg already present — checking for new flags"
+  if [ -n "$MAIN_CFG" ]; then
+    new_flags=0
+    pending_comments=""
+    while IFS= read -r ref_line; do
+      case "$ref_line" in
+        '#'*)
+          pending_comments="${pending_comments}${ref_line}
+"
+          continue
+          ;;
+        '')
+          pending_comments="${pending_comments}
+"
+          continue
+          ;;
+      esac
+      ref_key="${ref_line%%=*}"
+      if [ "$ref_key" = "$ref_line" ]; then
+        pending_comments=""
+        continue
+      fi
+      if ! grep -q "^${ref_key}=" "$FAT/retroachievements.cfg"; then
+        if [ "$DRY_RUN" = "0" ]; then
+          printf '%s' "$pending_comments" >> "$FAT/retroachievements.cfg"
+          echo "$ref_line" >> "$FAT/retroachievements.cfg"
+        else
+          echo "    [dry-run] would add: $ref_line"
+        fi
+        echo "  Added new flag: $ref_line"
+        summary="${summary}  cfg: added ${ref_line}
+"
+        new_flags=1
+      fi
+      pending_comments=""
+    done < "$MAIN_CFG"
+    [ "$new_flags" = "0" ] && echo "  No new flags — retroachievements.cfg is up to date"
+  fi
 fi
 
 # Prompt for credentials. If the cfg was just imported always prompt.
@@ -452,6 +494,8 @@ for rbf_file in "$STAGING_DIR"/cores/*.rbf; do
   else
     local_put "$rbf_file" "$FAT/_RA_Cores/Cores/$remote_name"
     echo "  Installed Cores/$remote_name  (tag: $core_release_tag)"
+    summary="${summary}  core: ${remote_name} installed/updated (${core_release_tag})
+"
   fi
 
   mgl_name="${core_name}.mgl"
@@ -505,6 +549,8 @@ EOF
   fi
   [ "$DRY_RUN" = "1" ] && echo "    [dry-run] skipping append to MiSTer.ini"
   echo "  Appended [RA_*] block to MiSTer.ini"
+  summary="${summary}  MiSTer.ini: appended [RA_*] block
+"
 fi
 
 # ─────────────────────────────────────────────
@@ -523,6 +569,12 @@ cat <<EOF
 
 == Install complete ==
 EOF
+
+if [ -n "$summary" ]; then
+  echo "What changed:"
+  printf '%s' "$summary"
+  echo
+fi
 
 if [ -n "$skipped_cores" ]; then
   echo "  WARNING: the following cores had errors and were skipped:"
