@@ -28,9 +28,22 @@ Files are placed under `/media/fat/_RA_Cores/` and kept completely separate from
 
 ---
 
+## Installatiion
+
+Add the following to /media/fat/downloader.ini.
+
+```ini
+[sage2050/MiSTer_RetroAchievements]
+db_url = https://raw.githubusercontent.com/sage2050/MiSTer_RetroAchievements/db/db.json.zip
+```
+
+Then run update\_all
+
+Or to install it manually copy [Scripts/MiSTer\_RA.sh](Scripts/MiSTer_RA.sh) to /media/fat/Scripts/
+
 ## Usage
 
-Place `MiSTer_RA.sh` in `/media/fat/Scripts/` and run it from the MiSTer's Scripts menu or a shell session.
+Run it from the MiSTer's Scripts menu or a shell session.
 
 ```bash
 ./MiSTer_RA.sh
