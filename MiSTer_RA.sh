@@ -377,12 +377,14 @@ else
   echo "  MiSTer_RA already at $main_tag — skipping"
 fi
 
-# Install the achievement sound effect if bundled in the release.
-if [ -n "$MAIN_WAV" ]; then
+# Install the achievement sound effect only if one doesn't already exist.
+if [ -n "$MAIN_WAV" ] && [ ! -f "$FAT/achievement.wav" ]; then
   local_put "$MAIN_WAV" "$FAT/achievement.wav"
   echo "  Installed achievement.wav"
   summary="${summary}  achievement.wav: installed
 "
+elif [ -f "$FAT/achievement.wav" ]; then
+  echo "  achievement.wav already exists — skipping (custom sound preserved)"
 fi
 
 # Install the config only if one doesn't already exist.
